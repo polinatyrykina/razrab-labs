@@ -9,9 +9,10 @@ def get_number_1(numb_x):
         except ValueError:
             print("Ошибка: введите число!")
 
-num1 = float(input("Введите первое число: "))
-num2 = float(input("Введите второе число: "))
-num3 = float(input("Введите третье число: "))
+# Используем функцию для ввода всех трёх чисел
+num1 = get_number_1("Введите первое число: ")
+num2 = get_number_1("Введите второе число: ")
+num3 = get_number_1("Введите третье число: ")
 
 numbers = [num1, num2, num3]
 result = [num for num in numbers if 1 <= num <= 50]
@@ -19,4 +20,4 @@ result = [num for num in numbers if 1 <= num <= 50]
 if result:  
     print("Числа, попадающие в интервал [1, 50]:", result)
 else:  
-    print(str("Ни одно число не попадает в интервал [1, 50]."))
+    print("Ни одно число не попадает в интервал [1, 50].")
