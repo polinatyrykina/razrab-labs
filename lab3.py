@@ -10,10 +10,10 @@ def no_number():
     return "Ошибка 400. Не передан парметр.", 400
 
 
-@lab3.route('/number/<int:param>', methods=['GET', 'POST'])
+@lab3.route('/number/<int:param>', methods=['GET'])
 def get_number(param):
     
-    # Генерируем рандомное число от 0 до 1
+    # Генерируем рандомное число 
     random_number = random.random()
     
     # Умножаем рандомное число на значение параметра
@@ -81,7 +81,6 @@ def delete_number():
     })
 
 # Раздел II. Отправка запросов на сервер с API.
-
 # Функция для отправки GET запроса
 def send_get():
     # Генерируем случайное число от 1 до 10
@@ -180,3 +179,14 @@ def execute():
     else:
         # Если что-то пошло не так, возвращаем ошибку
         return jsonify({"error": "Что-то пошло не так при выполнении запросов."}), 400
+    
+
+# Раздел III. Отправка запросов на сервер с API (curl).
+    
+# for /f "tokens=*" %a in ('powershell -Command "Get-Random -Minimum 1 -Maximum 10"') do curl -X GET "http://127.0.0.1:5000/number/%a"
+
+# for /f "tokens=*" %a in ('powershell -Command "Get-Random -Minimum 1 -Maximum 10"') do curl -X POST -H "Content-Type: application/json" -d "{\"jsonParam\": %a}" http://127.0.0.1:5000/number/
+
+# curl -X DELETE "http://127.0.0.1:5000/number/"
+
+# curl "http://127.0.0.1:5000/execute"
