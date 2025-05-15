@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 def get_db_connection():
     return psycopg2.connect(
-        dbname="razrab-labs_1",
+        dbname="razrab-labs",
         user="polina_tyrykina_knowledge_base",
         password="123",
         host="localhost",
@@ -23,7 +23,7 @@ def convert_currency():
     amount = request.args.get('amount')
 
     if not currency_name or not amount:
-        return jsonify({"error": "currency and amount parameters are required"}), 400
+        return jsonify({"error": "Параметры currency и amount обязательны"}), 400
 
     try:
         amount = float(amount)
@@ -35,7 +35,7 @@ def convert_currency():
         result = cur.fetchone()
 
         if not result:
-            return jsonify({"error": "Currency not found"}), 404
+            return jsonify({"error": "Валюта не найдена"}), 404
 
         rate = float(result[0])
         converted_amount = amount * rate
@@ -47,7 +47,7 @@ def convert_currency():
             "target_currency": "RUB"
         }), 200
     except:
-        return jsonify({"error": "Internal server error"}), 500
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
     
 
 @app.route('/currencies', methods=['GET'])

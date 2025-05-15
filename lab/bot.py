@@ -8,6 +8,8 @@ import psycopg2
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from dotenv import load_dotenv
 import psycopg2
+import logging
+
 
 load_dotenv()
 
@@ -24,7 +26,7 @@ ROLE_MANAGER_URL = "http://localhost:5003"
 
 # Подключение к БД
 conn = psycopg2.connect(
-        dbname="razrab-labs_1",
+        dbname="razrab-labs",
         user="polina_tyrykina_knowledge_base",
         password="123",
         host="localhost",
@@ -101,20 +103,19 @@ async def cmd_start(message: types.Message):
     # Проверяем, является ли пользователь администратором
     if await is_admin(chat_id):
         await message.answer(
-            "Привет! Вы вошли как администратор.\n"
+            "Привет! Вы администратор бота для конвертации валют.\n"
             "Доступные команды:\n"
-            "-Управление валютами\n"
-            "-Список всех валют\n"
-            "-Конвертация валют"
+            "/manage_currency - управление валютами\n"
+            "/get_currencies - список всех валют\n"
+            "/convert - конвертировать валюту в рубли"
         )
     else:
         await message.answer(
             "Привет! Я бот для конвертации валют.\n"
             "Доступные команды:\n"
-            "-Список всех валют\n"
-            "-Конвертация валют"
+            "/get_currencies - список всех валют\n"
+            "/convert - конвертировать валюту в рубли"
         )
-
 
 # Клавиатура для управления валютами
 def get_manage_keyboard():
