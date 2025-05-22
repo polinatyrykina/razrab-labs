@@ -2,25 +2,24 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Статические курсы валют
-CURRENCY_RATES = {
-    "USD": 78.00,
-    "EUR": 90.00
+rates = {
+    "USD": 90.5,
+    "EUR": 98.3
 }
 
-@app.route('/rate')
+@app.route("/rate")
 def get_rate():
-    currency = request.args.get('currency', '').upper()
-    
-    if currency not in CURRENCY_RATES:
+    currency = request.args.get("currency")
+    if not currency:
         return jsonify({"message": "UNKNOWN CURRENCY"}), 400
-    
+
+    if currency not in rates:
+        return jsonify({"message": "UNKNOWN CURRENCY"}), 400
+
     try:
-        return jsonify({"rate": CURRENCY_RATES[currency]}), 200
-    except Exception as e:
-        print(f"Ошибка сервера: {e}")
+        return jsonify({"rate": rates[currency]}), 200
+    except Exception:
         return jsonify({"message": "UNEXPECTED ERROR"}), 500
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(port=5000)

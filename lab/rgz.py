@@ -1,307 +1,221 @@
 import asyncio
 import os
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.filters.command import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-import psycopg2
-from datetime import datetime
-import aiohttp
-
 from dotenv import load_dotenv
 import psycopg2
+import requests
+from datetime import datetime
 
 load_dotenv()
 
-# Получение токена из переменного окружения
-
-API_TOKEN = os.getenv('API_TOKEN')
+API_TOKEN = os.getenv("API_TOKEN")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-conn = psycopg2.connect(
-    dbname="razrab-labs",
-    user="polina_tyrykina_knowledge_base",
-    password="123",
-    host="localhost",
-    port="5432",
-    client_encoding="utf8"
-)
-cur = conn.cursor()
+def get_db_connection():
+    return psycopg2.connect(
+        dbname="razrab-labs",
+        user="polina_tyrykina_knowledge_base",
+        password="123",
+        host="localhost",
+        port="5432",
+        client_encoding="utf8"
+    )
 
-
-class FinanceStates(StatesGroup):
+# Состояния FSM
+class RegStates(StatesGroup):
     waiting_for_login = State()
+
+class OperationStates(StatesGroup):
     waiting_for_operation_type = State()
-    waiting_for_amount = State()
+    waiting_for_sum = State()
     waiting_for_date = State()
+
+class ViewOperationsStates(StatesGroup):
     waiting_for_currency = State()
     waiting_for_operation_filter = State()
 
-commands = [
-    types.BotCommand(command="start", description="Начать работу"),
-    types.BotCommand(command="reg", description="Регистрация"),
-    types.BotCommand(command="add_operation", description="Добавить операцию"),
-    types.BotCommand(command="operations", description="Просмотр операций")
-]
+# Проверка регистрации
+def is_registered(chat_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM users WHERE chat_id = %s", (str(chat_id),))
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+    return result is not None
 
-async def setup_bot_commands():
-    await bot.set_my_commands(commands)
-
-async def is_registered(chat_id: int) -> bool:
-    cur.execute("SELECT 1 FROM users WHERE chat_id = %s", (chat_id,))
-    return cur.fetchone() is not None
-
-async def get_currency_rate(currency: str) -> float:
-    if currency == "RUB":
-        return 1.0
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f'http://localhost:5000/rate?currency={currency}') as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                return data['rate']
-            return 0.0
-
+# Команда /start
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer(
-        "Добро пожаловать в бот для учета финансов!\n"
-        "Доступные команды:\n"
-        "/reg - регистрация\n"
-        "/add_operation - добавить операцию\n"
-        "/operations - просмотр операций"
-    )
+    await message.answer("Привет! Я финансовый бот.\nКоманды:\n/reg — регистрация\n/add_operation — новая операция\n/operations — просмотр операций")
 
+# Команда /reg
 @dp.message(Command("reg"))
 async def cmd_reg(message: types.Message, state: FSMContext):
-    chat_id = message.chat.id
-    if await is_registered(chat_id):
-        await message.answer("Вы уже зарегистрированы!")
+    if is_registered(message.chat.id):
+        await message.answer("Вы уже зарегистрированы.")
         return
-    await message.answer("Введите ваш логин:")
-    await state.set_state(FinanceStates.waiting_for_login)
+    await message.answer("Введите логин:")
+    await state.set_state(RegStates.waiting_for_login)
 
-@dp.message(FinanceStates.waiting_for_login)
+@dp.message(RegStates.waiting_for_login)
 async def process_login(message: types.Message, state: FSMContext):
-    name = message.text.strip()
-    if not name:
-        await message.answer("Логин не может быть пустым!")
-        return
-    
-    chat_id = message.chat.id
-    try:
-        cur.execute(
-            "INSERT INTO users (chat_id, name) VALUES (%s, %s)",
-            (chat_id, name)
-        )
-        conn.commit()
-        await message.answer(f"Регистрация успешно завершена, {name}!")
-        await state.clear()
-    except:
-        await message.answer("Ошибка при регистрации. Попробуйте позже.")
-        await state.clear()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO users (chat_id, name) VALUES (%s, %s)", (str(message.chat.id), message.text))
+    conn.commit()
+    cur.close()
+    conn.close()
+    await message.answer("Регистрация успешна.")
+    await state.clear()
 
-def get_operation_type_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="ДОХОД"), KeyboardButton(text="РАСХОД")]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-def get_currency_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="RUB"), KeyboardButton(text="EUR"), KeyboardButton(text="USD")]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-def get_operation_filter_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="РАСХОДНЫЕ ОПЕРАЦИИ"), KeyboardButton(text="ДОХОДНЫЕ ОПЕРАЦИИ")],
-            [KeyboardButton(text="ВСЕ")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
+# Команда /add_operation
 @dp.message(Command("add_operation"))
 async def cmd_add_operation(message: types.Message, state: FSMContext):
-    chat_id = message.chat.id
-    if not await is_registered(chat_id):
-        await message.answer("Сначала зарегистрируйтесь с помощью команды /reg")
+    if not is_registered(message.chat.id):
+        await message.answer("Сначала зарегистрируйтесь с помощью /reg")
         return
-    await message.answer("Выберите тип операции:", reply_markup=get_operation_type_keyboard())
-    await state.set_state(FinanceStates.waiting_for_operation_type)
 
-@dp.message(FinanceStates.waiting_for_operation_type)
+    keyboard = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="РАСХОД"), KeyboardButton(text="ДОХОД")]
+    ], resize_keyboard=True)
+
+    await message.answer("Выберите тип операции:", reply_markup=keyboard)
+    await state.set_state(OperationStates.waiting_for_operation_type)
+
+@dp.message(OperationStates.waiting_for_operation_type)
 async def process_operation_type(message: types.Message, state: FSMContext):
-    operation_type = message.text.upper()
-    if operation_type not in ["ДОХОД", "РАСХОД"]:
-        await message.answer("Пожалуйста, выберите тип операции из предложенных вариантов")
+    if message.text not in ["РАСХОД", "ДОХОД"]:
+        await message.answer("Выберите кнопку.")
         return
-    await state.update_data(type_operation=operation_type)
-    await message.answer("Введите сумму операции в рублях:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(FinanceStates.waiting_for_amount)
+    await state.update_data(type_operation=message.text)
+    await message.answer("Введите сумму операции (в рублях):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(OperationStates.waiting_for_sum)
 
-@dp.message(FinanceStates.waiting_for_amount)
-async def process_amount(message: types.Message, state: FSMContext):
+@dp.message(OperationStates.waiting_for_sum)
+async def process_operation_sum(message: types.Message, state: FSMContext):
     try:
-        amount = float(message.text)
-        if amount <= 0:
-            await message.answer("Сумма должна быть положительной!")
-            return
-        await state.update_data(amount=amount)
-        await message.answer("Введите дату операции в формате ДД.ММ.ГГГГ (или /today для сегодняшней даты):")
-        await state.set_state(FinanceStates.waiting_for_date)
-    except:
-        await message.answer("Пожалуйста, введите число!")
+        sum_value = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+    await state.update_data(sum=sum_value)
+    await message.answer("Введите дату операции (ГГГГ-ММ-ДД):")
+    await state.set_state(OperationStates.waiting_for_date)
 
-@dp.message(Command("today"), FinanceStates.waiting_for_date)
-async def cmd_today(message: types.Message, state: FSMContext):
-    today = datetime.now().date()
-    await state.update_data(date=today)
-    await save_operation(message, state)
-
-@dp.message(FinanceStates.waiting_for_date)
-async def process_date(message: types.Message, state: FSMContext):
+@dp.message(OperationStates.waiting_for_date)
+async def process_operation_date(message: types.Message, state: FSMContext):
     try:
-        date_str = message.text
-        date = datetime.strptime(date_str, "%d.%m.%Y").date()
-        
-        if date > datetime.now().date():
-            await message.answer("Дата операции не может быть позже сегодняшнего дня!")
-            return
-            
-        await state.update_data(date=date)
-        await save_operation(message, state)
-    except:
-        await message.answer("Неверный формат даты. Введите дату в формате ДД.ММ.ГГГГ")
+        date_value = datetime.strptime(message.text, "%Y-%m-%d").date()
+    except ValueError:
+        await message.answer("Формат даты: ГГГГ-ММ-ДД.")
+        return
 
-async def save_operation(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    chat_id = message.chat.id
-    
-    try:
-        cur.execute(
-            "INSERT INTO operations (date, amount, chat_id, type_operation) VALUES (%s, %s, %s, %s)",
-            (data["date"], data["amount"], chat_id, data["type_operation"])
-        )
-        conn.commit()
-        await message.answer(
-            f"Операция успешно добавлена!\n"
-            f"Тип: {data['type_operation']}\n"
-            f"Сумма: {data['amount']} RUB\n"
-            f"Дата: {data['date'].strftime('%d.%m.%Y')}"
-        )
-        await state.clear()
-    except:
-        await message.answer("Ошибка при сохранении операции. Попробуйте позже.")
-        await state.clear()
 
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO operations (date, sum, chat_id, type_operation)
+        VALUES (%s, %s, %s, %s)
+    """, (date_value, data["sum"], str(message.chat.id), data["type_operation"]))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    await message.answer("Операция успешно добавлена.")
+    await state.clear()
+
+# Команда /operations
 @dp.message(Command("operations"))
 async def cmd_operations(message: types.Message, state: FSMContext):
-    chat_id = message.chat.id
-    if not await is_registered(chat_id):
-        await message.answer("Сначала зарегистрируйтесь с помощью команды /reg")
+    if not is_registered(message.chat.id):
+        await message.answer("Сначала зарегистрируйтесь с помощью /reg")
         return
-    
-    cur.execute(
-        "SELECT 1 FROM operations WHERE chat_id = %s LIMIT 1",
-        (chat_id,)
-    )
-    if not cur.fetchone():
-        await message.answer("У вас пока нет операций")
-        return
-    
-    await message.answer("Выберите валюту для отображения операций:", reply_markup=get_currency_keyboard())
-    await state.set_state(FinanceStates.waiting_for_currency)
 
-@dp.message(FinanceStates.waiting_for_currency)
+    keyboard = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="RUB"), KeyboardButton(text="USD"), KeyboardButton(text="EUR")]
+    ], resize_keyboard=True)
+
+    await message.answer("Выберите валюту:", reply_markup=keyboard)
+    await state.set_state(ViewOperationsStates.waiting_for_currency)
+
+@dp.message(ViewOperationsStates.waiting_for_currency)
 async def process_currency(message: types.Message, state: FSMContext):
-    currency = message.text.upper()
-    if currency not in ["RUB", "EUR", "USD"]:
-        await message.answer("Пожалуйста, выберите валюту из предложенных вариантов")
+    if message.text not in ["RUB", "USD", "EUR"]:
+        await message.answer("Выберите валюту из кнопок.")
         return
-    
-    await state.update_data(currency=currency)
-    await message.answer("Выберите тип операций для отображения:", reply_markup=get_operation_filter_keyboard())
-    await state.set_state(FinanceStates.waiting_for_operation_filter)
+    await state.update_data(currency=message.text)
 
-@dp.message(FinanceStates.waiting_for_operation_filter)
+    keyboard = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="РАСХОДНЫЕ ОПЕРАЦИИ"), KeyboardButton(text="ДОХОДНЫЕ ОПЕРАЦИИ")],
+        [KeyboardButton(text="ВСЕ")]
+    ], resize_keyboard=True)
+
+    await message.answer("Какие операции вывести?", reply_markup=keyboard)
+    await state.set_state(ViewOperationsStates.waiting_for_operation_filter)
+
+@dp.message(ViewOperationsStates.waiting_for_operation_filter)
 async def process_operation_filter(message: types.Message, state: FSMContext):
-    operation_filter = message.text.upper()
-    if operation_filter not in ["РАСХОДНЫЕ ОПЕРАЦИИ", "ДОХОДНЫЕ ОПЕРАЦИИ", "ВСЕ"]:
-        await message.answer("Пожалуйста, выберите тип операций из предложенных вариантов", reply_markup=ReplyKeyboardRemove())
-        await state.clear()
+    if message.text not in ["РАСХОДНЫЕ ОПЕРАЦИИ", "ДОХОДНЫЕ ОПЕРАЦИИ", "ВСЕ"]:
+        await message.answer("Выберите вариант.")
         return
-    
+
     data = await state.get_data()
     currency = data["currency"]
-    chat_id = message.chat.id
-    
-    rate = await get_currency_rate(currency)
-    if rate == 0.0 and currency != "RUB":
-        await message.answer("Не удалось получить курс валюты. Попробуйте позже.", reply_markup=ReplyKeyboardRemove())
-        await state.clear()
-        return
-    
-    # Формируем SQL запрос в зависимости от выбранного фильтра
-    if operation_filter == "ВСЕ":
-        cur.execute(
-            "SELECT date, amount, type_operation FROM operations WHERE chat_id = %s ORDER BY date DESC",
-            (chat_id,)
-        )
-    elif operation_filter == "ДОХОДНЫЕ ОПЕРАЦИИ":
-        cur.execute(
-            "SELECT date, amount, type_operation FROM operations WHERE chat_id = %s AND type_operation = 'ДОХОД' ORDER BY date DESC",
-            (chat_id,)
-        )
-    else:  # РАСХОДНЫЕ ОПЕРАЦИИ
-        cur.execute(
-            "SELECT date, amount, type_operation FROM operations WHERE chat_id = %s AND type_operation = 'РАСХОД' ORDER BY date DESC",
-            (chat_id,)
-        )
-    
+    filter_type = message.text
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    query = "SELECT date, sum, type_operation FROM operations WHERE chat_id = %s"
+    params = [str(message.chat.id)]
+
+    type_mapping = {
+        "РАСХОДНЫЕ ОПЕРАЦИИ": "РАСХОД",
+        "ДОХОДНЫЕ ОПЕРАЦИИ": "ДОХОД"
+}
+
+    if filter_type != "ВСЕ":
+        query += " AND type_operation = %s"
+        params.append(type_mapping.get(filter_type))
+
+
+    cur.execute(query, tuple(params))
     operations = cur.fetchall()
-    
+    cur.close()
+    conn.close()
+
+    if currency != "RUB":
+        try:
+            response = requests.get(f"http://localhost:5000/rate?currency={currency}")
+            response.raise_for_status()
+            rate = response.json()["rate"]
+        except:
+            await message.answer("Ошибка получения курса.")
+            await state.clear()
+            return
+    else:
+        rate = 1
+
     if not operations:
-        await message.answer("Нет операций по выбранному фильтру", reply_markup=ReplyKeyboardRemove())
-        await state.clear()
-        return
-    
-    total_income = 0.0
-    total_expense = 0.0
-    response = f"Ваши операции ({currency}):\n\n"
-    
-    for op in operations:
-        date = op[0].strftime("%d.%m.%Y")
-        amount = float(op[1]) / rate  # Конвертируем из RUB в выбранную валюту
-        op_type = op[2]
-        
-        if op_type == "ДОХОД":
-            total_income += amount
-            prefix = "+"
-        else:
-            total_expense += amount
-            prefix = "-"
-        
-        response += f"{date} {op_type}: {prefix}{amount:.2f} {currency}\n"
-    
-    response += f"\nИтого доходы: {total_income:.2f} {currency}\n"
-    response += f"Итого расходы: {total_expense:.2f} {currency}\n"
-    response += f"Баланс: {total_income - total_expense:.2f} {currency}"
-    
-    await message.answer(response, reply_markup=ReplyKeyboardRemove())
+        await message.answer("Операций не найдено.")
+    else:
+        response = "Ваши операции:\n"
+        for op in operations:
+            converted_sum = float(op[1]) / rate
+            response += f"{op[0]} | {op[2]} | {converted_sum:.2f} {currency}\n"
+        await message.answer(response)
+
     await state.clear()
 
 async def main():
-    await setup_bot_commands()
     await dp.start_polling(bot)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
-    cur.close()
-    conn.close()
