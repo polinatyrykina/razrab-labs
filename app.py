@@ -1,10 +1,13 @@
 from flask import Flask, url_for
 
 from lab3 import lab3
+from lab6_1 import lab6_1
+
 
 app = Flask(__name__)
 
 app.register_blueprint(lab3)
+app.register_blueprint(lab6_1)
 
 @app.route("/")
 @app.route("/index")
